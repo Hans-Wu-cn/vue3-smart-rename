@@ -1,0 +1,53 @@
+{
+  "name": "vue3-smart-rename",
+  "displayName": "Vue3 Smart Rename",
+  "description": "Vue3 智能重命名插件 - 自动同步更新组件参数、函数和变量名",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.70.0"
+  },
+  "activationEvents": [
+    "onCommand:vue3-smart-rename.smartRename"
+  ],
+  "main": "out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "vue3-smart-rename.smartRename",
+        "title": "智能同步更新变量/函数名"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "vue3-smart-rename.smartRename",
+        "key": "ctrl+shift+r",
+        "mac": "cmd+shift+r"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "devDependencies": {
+    "@types/node": "^16.11.7",
+    "@types/vscode": "^1.70.0",
+    "@vscode/vsce": "^3.7.1",
+    "typescript": "^4.8.4"
+  },
+  "keywords": [
+    "vscode",
+    "extension",
+    "vue",
+    "vue3",
+    "rename",
+    "refactor",
+    "props",
+    "smart-rename",
+    "sync"
+  ],
+  "author": "",
+  "license": "MIT"
+}

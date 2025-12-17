@@ -1,0 +1,236 @@
+import * as vscode from 'vscode';
+import { isSymbolExported, getReferencesInCurrentFile, getReferencesInOtherFiles, analyzePropsTransmission, findAllTextReferences } from '../utils/symbolAnalyzer';
+
+export async function smartRename() {
+  try {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+      vscode.window.showErrorMessage('请在编辑器中选择要重命名的变量或函数');
+      return;
+    }
+
+    const document = editor.document;
+    const position = editor.selection.active;
+    const symbolRange = document.getWordRangeAtPosition(position);
+    if (!symbolRange) {
+      vscode.window.showErrorMessage('未找到可重命名的符号');
+      return;
+    }
+
+    const oldName = document.getText(symbolRange);
+    const newName = await vscode.window.showInputBox({
+      prompt: `请输入新的名称 (当前: ${oldName})`,
+      value: oldName
+    });
+
+    if (!newName || newName === oldName) {
+      return;
+    }
+  } catch (error: any) {
+    vscode.window.showErrorMessage(`输入新名称时发生错误: ${error.message || error}`);
+    console.error('输入新名称错误:', error);
+    return;
+  }
+
+  // 1. 获取所有引用
+  let references = await vscode.commands.executeCommand<vscode.Location[]>(
+    'vscode.executeReferenceProvider',
+    document.uri,
+    position
+  ) || [];
+
+  // 2. 获取当前工作区
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+  
+  // 3. 检测Vue组件的props透传
+  const isVueFile = document.fileName.toLowerCase().endsWith('.vue');
+  
+  if (isVueFile && workspaceFolder) {
+    // 从文件名提取组件名称（假设文件名就是组件名，如ChildComponent.vue）
+    const fileName = document.fileName.split('\\').pop() || '';
+    const componentName = fileName.replace('.vue', '');
+    
+    // 分析props透传关系
+    const transmissionReferences = await analyzePropsTransmission(componentName, oldName, workspaceFolder);
+    
+    // 合并透传引用到总引用列表
+    references = [...new Set([...references, ...transmissionReferences])];
+    
+    if (transmissionReferences.length > 0) {
+      vscode.window.showInformationMessage(`检测到props透传引用: ${transmissionReferences.length}个`);
+    }
+  }
+  
+  // 4. 使用文本搜索作为补充（当引用检测结果不足时）
+  if (workspaceFolder && (references.length < 2 || getReferencesInOtherFiles(references, document.uri).length === 0)) {
+    // 执行文本搜索，查找所有匹配的符号引用
+    const textReferences = await findAllTextReferences(oldName, workspaceFolder);
+    
+    // 合并文本搜索结果到总引用列表
+    const mergedReferences = [...new Set([...references, ...textReferences])];
+    
+    if (mergedReferences.length > references.length) {
+      references = mergedReferences;
+      vscode.window.showInformationMessage(`使用文本搜索补充引用，共检测到: ${references.length}个引用`);
+    }
+  }
+
+  // 3. 分类引用
+  let currentFileReferences = getReferencesInCurrentFile(references, document.uri);
+  let otherFileReferences = getReferencesInOtherFiles(references, document.uri);
+  
+  // 4. 检查符号是否被导出或有跨文件引用
+  const isExported = await isSymbolExported(document, position);
+  
+  // 5. 智能选择更新范围
+  let updateAllFiles = false;
+  
+  // 检查是否有跨文件引用或符号被导出
+  if (isExported || otherFileReferences.length > 0) {
+    // 符号被外部使用或有跨文件引用，执行全局更新
+    updateAllFiles = true;
+    vscode.window.showInformationMessage(`检测到跨文件引用，将执行全局更新。当前文件引用: ${currentFileReferences.length}, 跨文件引用: ${otherFileReferences.length}`);
+  } else {
+    // 没有检测到跨文件引用，但让用户确认是否需要全局更新
+    const choice = await vscode.window.showQuickPick(
+      [
+        { label: '仅更新当前文件', description: `当前文件引用: ${currentFileReferences.length}个` },
+        { label: '全局更新', description: '搜索并更新所有文件中的引用' }
+      ],
+      {
+        placeHolder: '未检测到明确的跨文件引用，选择更新范围',
+        ignoreFocusOut: true
+      }
+    );
+    
+    if (!choice) {
+      // 用户取消了操作
+      vscode.window.showInformationMessage('已取消重命名操作');
+      return;
+    }
+    
+    updateAllFiles = choice.label === '全局更新';
+    
+    if (updateAllFiles) {
+      vscode.window.showInformationMessage('将执行全局更新');
+      // 如果选择全局更新，再次执行文本搜索确保找到所有引用
+      if (workspaceFolder) {
+        const textReferences = await findAllTextReferences(oldName, workspaceFolder);
+        references = [...new Set([...references, ...textReferences])];
+        // 重新分类引用
+        otherFileReferences = getReferencesInOtherFiles(references, document.uri);
+      }
+    } else {
+      vscode.window.showInformationMessage('将仅更新当前文件');
+    }
+  }
+
+  // 5. 执行重命名
+  try {
+    if (updateAllFiles) {
+      // 全局重命名
+      await renameAllFiles(references, oldName, newName);
+      
+      vscode.window.showInformationMessage(`已全局更新所有引用: ${oldName} → ${newName}，共处理 ${references.length} 个引用`);
+    } else {
+      // 仅当前文件重命名
+      await renameInCurrentFile(editor, currentFileReferences, oldName, newName);
+      
+      vscode.window.showInformationMessage(`已在当前文件更新所有引用: ${oldName} → ${newName}，共处理 ${currentFileReferences.length} 个引用`);
+    }
+  } catch (error: any) {
+    vscode.window.showErrorMessage(`重命名过程中发生错误: ${error.message || error}`);
+    console.error('重命名错误:', error);
+  }
+}
+
+/**
+ * 执行全局重命名，处理所有文件中的引用
+ */
+async function renameAllFiles(references: vscode.Location[], oldName: string, newName: string) {
+  // 按文件分组引用
+  const referencesByFile = new Map<string, vscode.Location[]>();
+  
+  for (const ref of references) {
+    const filePath = ref.uri.fsPath;
+    if (!referencesByFile.has(filePath)) {
+      referencesByFile.set(filePath, []);
+    }
+    referencesByFile.get(filePath)?.push(ref);
+  }
+  
+  let updatedCount = 0;
+  
+  // 处理每个文件
+  for (const [filePath, fileReferences] of referencesByFile) {
+    try {
+      // 按行号倒序排序，避免替换后影响后续位置
+      const sortedReferences = fileReferences.sort((a, b) => b.range.start.line - a.range.start.line);
+      
+      // 打开文档并执行编辑
+      const uri = vscode.Uri.file(filePath);
+      const document = await vscode.workspace.openTextDocument(uri);
+      const textEditor = await vscode.window.showTextDocument(document);
+      
+      await textEditor.edit(editBuilder => {
+        for (const ref of sortedReferences) {
+          // 处理不同类型的引用
+          const currentText = document.getText(ref.range);
+          
+          if (currentText.includes(':') || currentText.includes('v-bind:') || currentText.includes('v-model:')) {
+            // Vue props绑定，如 :selectedIds="value" 或 v-bind:selectedIds="value"
+            const newPropText = currentText.replace(new RegExp(`(?<=[:\\s])${oldName}(?=[\\s=])`, 'g'), newName);
+            editBuilder.replace(ref.range, newPropText);
+          } else {
+            // 普通引用
+            editBuilder.replace(ref.range, newName);
+          }
+          updatedCount++;
+        }
+      });
+      
+      // 保存文件
+      await document.save();
+    } catch (error: any) {
+      console.error(`处理文件 ${filePath} 时出错:`, error);
+      vscode.window.showWarningMessage(`处理文件 ${filePath} 时出错: ${error.message || error}`);
+    }
+  }
+  
+  return updatedCount;
+}
+
+async function renameInCurrentFile(editor: vscode.TextEditor, references: vscode.Location[], oldName: string, newName: string) {
+  // 过滤掉无效的引用，确保每个引用都有有效的range
+  const validReferences = references.filter(ref => ref && ref.range);
+  
+  if (validReferences.length === 0) {
+    vscode.window.showInformationMessage(`未找到${oldName}的引用`);
+    return;
+  }
+  
+  // 按行号倒序排序，避免替换后影响后续位置
+  const sortedReferences = validReferences.sort((a, b) => b.range.start.line - a.range.start.line);
+  
+  let updatedCount = 0;
+  
+  await editor.edit(editBuilder => {
+    for (const ref of sortedReferences) {
+      // 处理不同类型的引用
+      const document = editor.document;
+      const currentText = document.getText(ref.range);
+      
+      if (currentText.includes(':') || currentText.includes('v-bind:') || currentText.includes('v-model:')) {
+        // Vue props绑定，如 :selectedIds="value" 或 v-bind:selectedIds="value"
+        const newPropText = currentText.replace(new RegExp(`(?<=[:\\s])${oldName}(?=[\\s=])`, 'g'), newName);
+        editBuilder.replace(ref.range, newPropText);
+      } else {
+        // 普通引用
+        editBuilder.replace(ref.range, newName);
+      }
+      updatedCount++;
+    }
+  });
+  
+  return updatedCount;
+}

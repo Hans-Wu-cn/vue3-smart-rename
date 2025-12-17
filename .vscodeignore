@@ -1,0 +1,9 @@
+node_modules/
+.vscode/
+.git/
+.gitignore
+*.log
+*.vsix
+README.md
+CHANGELOG.md
+LICENSE
