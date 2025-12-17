@@ -5,8 +5,8 @@
 
 # VSCode Vue3 Smart Rename Extension
 
-An intelligent rename extension designed specifically for Vue 3 projects.  
-It automatically synchronizes updates of component props, functions, and variable names across all references in your project.
+Smart renaming Vscode extension designed for Vue 3 projects.
+It automatically and synchronously updates all component props, function and variable names referenced in the project.
 
 ## Features
 
