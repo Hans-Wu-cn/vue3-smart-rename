@@ -1,8 +1,13 @@
 {
   "name": "vue3-smart-rename",
   "displayName": "Vue3 Smart Rename",
-  "description": "Vue3 智能重命名插件 - 自动同步更新组件参数、函数和变量名",
+  "description": "An intelligent rename extension for Vue 3 projects that automatically synchronizes updates of component props, functions, and variable names",
   "version": "0.0.1",
+  "publisher": "cn-hansWu",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cn-hansWu/vue3-smart-rename.git"
+  },
   "engines": {
     "vscode": "^1.70.0"
   },
