@@ -79,7 +79,7 @@ async function smartRename() {
             // 符号被外部使用或有跨文件引用，执行全局更新
             updateAllFiles = true;
             console.log(`[调试] 检测到跨文件引用: 导出=${isExported}, 当前文件=${currentFileReferences.length}, 其他文件=${otherFileReferences.length}`);
-            console.log(`[调试] 其他文件列表:`, otherFileReferences.map(ref => ref.uri.fsPath));
+            console.log(`[调试] 其他文件列表:`, otherFileReferences.map(ref => ref?.uri?.fsPath || 'unknown').filter(path => path !== 'unknown'));
             console.log(`[调试] 总引用数: ${validReferences.length}`);
             vscode.window.showInformationMessage(`检测到跨文件引用，将执行全局更新。当前文件引用: ${currentFileReferences.length}, 跨文件引用: ${otherFileReferences.length}`);
             // 只有在确定需要全局更新时，才执行昂贵的全局扫描（props 透传 + 文本搜索）
@@ -97,8 +97,12 @@ async function smartRename() {
                 }
                 // 使用文本搜索补充引用，确保全局模式下尽可能完整
                 const textReferences = await (0, symbolAnalyzer_1.findAllTextReferences)(oldName, workspaceFolder);
-                const existingKeys = new Set(references.map(ref => `${ref.uri.fsPath}:${ref.range.start.line}:${ref.range.start.character}`));
+                const existingKeys = new Set(references
+                    .filter(ref => ref && ref.uri && ref.range)
+                    .map(ref => `${ref.uri.fsPath}:${ref.range.start.line}:${ref.range.start.character}`));
                 const newTextReferences = textReferences.filter(ref => {
+                    if (!ref || !ref.uri || !ref.range)
+                        return false;
                     const key = `${ref.uri.fsPath}:${ref.range.start.line}:${ref.range.start.character}`;
                     return !existingKeys.has(key);
                 });
@@ -192,11 +196,15 @@ async function renameAllFiles(references, oldName, newName) {
     const referencesByFile = new Map();
     for (const ref of references) {
         // 检查引用是否有效
-        if (!ref || !ref.uri) {
+        if (!ref || !ref.uri || !ref.range) {
             console.warn('跳过无效引用:', ref);
             continue;
         }
         const filePath = ref.uri.fsPath;
+        if (!filePath) {
+            console.warn('跳过无效文件路径的引用:', ref);
+            continue;
+        }
         if (!referencesByFile.has(filePath)) {
             referencesByFile.set(filePath, []);
         }
